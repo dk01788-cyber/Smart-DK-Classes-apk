@@ -1,0 +1,41 @@
+name: Build Demo APK v3
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Unzip Android project v3
+        run: |
+          rm -rf appsrc
+          mkdir appsrc
+          unzip -o Smart_DK_Classes_Demo_Android_Project_v3_SAFE_BANNER.zip -d appsrc
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Build APK
+        working-directory: appsrc/SmartDKClassesDemoProject
+        run: gradle assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Smart-DK-Classes-v3-APK
+          path: appsrc/SmartDKClassesDemoProject/app/build/outputs/apk/debug/app-debug.apk
