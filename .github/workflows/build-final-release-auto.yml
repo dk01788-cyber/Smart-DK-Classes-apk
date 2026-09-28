@@ -23,7 +23,7 @@ jobs:
         run: |
           rm -rf appsrc
           mkdir appsrc
-          unzip -o Smart_DK_Classes_Final_Release_Project.zip -d appsrc
+          unzip -o Smart_DK_Classes_Android_Source_v1.1.1_Website_Sync.zip.zip -d appsrc
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -31,7 +31,7 @@ jobs:
           gradle-version: '8.10.2'
 
       - name: Build unsigned release APK
-        working-directory: appsrc/SmartDKClassesDemoProject
+        working-directory: working-directory: appsrc
         run: gradle assembleRelease
 
       - name: Restore permanent signing key
@@ -45,7 +45,7 @@ jobs:
           KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASS: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          UNSIGNED="appsrc/SmartDKClassesDemoProject/app/build/outputs/apk/release/app-release-unsigned.apk"
+          UNSIGNED="appsrc/app/build/outputs/apk/release/app-release-unsigned.apk"
           ZIPALIGN=$(find "$ANDROID_HOME/build-tools" -type f -name zipalign | sort -V | tail -n 1)
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)
           "$ZIPALIGN" -f -p 4 "$UNSIGNED" Smart-DK-Classes-Final-aligned.apk
