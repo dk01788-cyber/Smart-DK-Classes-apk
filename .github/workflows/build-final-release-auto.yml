@@ -23,7 +23,7 @@ jobs:
         run: |
           rm -rf appsrc
           mkdir appsrc
-          unzip -o "Smart_DK_Classes_Android_Source_v1.1.4_Portrait_Landscape (1).zip" -d appsrc
+         unzip -o "Smart_DK_Classes_Android_Source_v1.1.6_Indus_Review_Fix.zip" -d appsrc
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
