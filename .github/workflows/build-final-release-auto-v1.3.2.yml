@@ -24,6 +24,10 @@ jobs:
           rm -rf appsrc
           mkdir appsrc
           unzip -o "Smart_DK_Classes_Android_Source_v1.3.2_AdMob_FINAL.zip" -d appsrc
+               
+                - name: Enable AndroidX
+        working-directory: appsrc
+        run: echo "android.useAndroidX=true" > gradle.properties
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
