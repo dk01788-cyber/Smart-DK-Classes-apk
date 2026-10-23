@@ -1,4 +1,4 @@
-name: Smart DK Classes - Automatic APK Builder
+name: Smart DK Classes - Automatic APK and Play AAB Builder
 
 # Commit a newer Admin/Public source ZIP to the repository root.
 # This workflow stays unchanged for later app versions.
@@ -10,7 +10,7 @@ on:
       - 'Smart_DK_Classes_Admin_Source*.zip'
       - 'Smart_DK_Classes_Public_Android_Source*.zip'
       - 'Smart_DK_Classes_Android_Source*.zip'
-      - '.github/workflows/build-sdkc-auto-apk.yml'
+      - '.github/workflows/build-sdkc-auto-apk-FIXED.yml'
   workflow_dispatch:
     inputs:
       build_target:
@@ -76,18 +76,18 @@ jobs:
               before = os.environ.get('BEFORE_SHA') or ''
               after = os.environ.get('COMMIT_SHA') or ''
               if not before or set(before) == {'0'}:
-                  return {'.github/workflows/build-sdkc-auto-apk.yml'}
+                  return {'.github/workflows/build-sdkc-auto-apk-FIXED.yml'}
               try:
                   result = subprocess.check_output(
                       ['git', 'diff', '--name-only', before, after], text=True)
                   return set(result.splitlines())
               except subprocess.CalledProcessError:
-                  return {'.github/workflows/build-sdkc-auto-apk.yml'}
+                  return {'.github/workflows/build-sdkc-auto-apk-FIXED.yml'}
 
           files = changed_files()
           manual = os.environ.get('EVENT_NAME') == 'workflow_dispatch'
           target = os.environ.get('MANUAL_TARGET') or 'both'
-          workflow_changed = '.github/workflows/build-sdkc-auto-apk.yml' in files
+          workflow_changed = '.github/workflows/build-sdkc-auto-apk-FIXED.yml' in files
           include = []
 
           for app, globs in patterns.items():
@@ -117,7 +117,7 @@ jobs:
           PY
 
   build-apk:
-    name: Build ${{ matrix.app }} APK
+    name: Build ${{ matrix.app }} APK / Play AAB
     needs: select-sources
     if: needs.select-sources.outputs.count != '0'
     runs-on: ubuntu-latest
@@ -138,14 +138,14 @@ jobs:
       # GitHub's ubuntu-latest image includes Android SDK tools.
       # Do NOT use android-actions/setup-android@v3 here: its default
       # `sdkmanager tools` call fails (the obsolete `tools` package).
-      - name: Install Android 35 platform and build tools
+      - name: Install Android SDK platforms 35 and 36
         shell: bash
         run: |
           set -euo pipefail
           if command -v sdkmanager >/dev/null 2>&1; then
-            sdkmanager --install 'platforms;android-35' 'build-tools;35.0.0'
+            sdkmanager --install 'platforms;android-35' 'platforms;android-36' 'build-tools;35.0.0'
           elif [[ -x "${ANDROID_HOME:-}/cmdline-tools/latest/bin/sdkmanager" ]]; then
-            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-35' 'build-tools;35.0.0'
+            "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install 'platforms;android-35' 'platforms;android-36' 'build-tools;35.0.0'
           else
             echo 'SDK manager is unavailable on this runner.' >&2
             exit 1
@@ -154,7 +154,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.10.2'
+          gradle-version: '8.11.1'
 
       - name: Extract ZIP and locate Android project automatically
         id: project
@@ -206,11 +206,15 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROJECT_DIR"
+          tasks=(assembleDebug assembleRelease)
+          if [[ "${{ matrix.app }}" == "Public" ]]; then
+            tasks+=(bundleRelease)
+          fi
           if [[ -f ./gradlew ]]; then
             chmod +x ./gradlew
-            ./gradlew --no-daemon --stacktrace assembleDebug assembleRelease
+            ./gradlew --no-daemon --stacktrace "${tasks[@]}"
           else
-            gradle --no-daemon --stacktrace assembleDebug assembleRelease
+            gradle --no-daemon --stacktrace "${tasks[@]}"
           fi
 
       - name: Save Debug APK (install for testing)
@@ -278,3 +282,47 @@ jobs:
           path: ${{ runner.temp }}/sdkc-release-signed.apk
           if-no-files-found: error
           retention-days: 30
+
+      # Google Play requires an upload-signed Android App Bundle (.aab).
+      # This step uses the existing secret keystore; never commit secrets.
+      - name: Sign Play Store AAB (Public app only)
+        if: matrix.app == 'Public' && steps.signing.outputs.ready == 'true'
+        shell: bash
+        env:
+          KS_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KS_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KS_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          PUBLIC_ALIAS: ${{ secrets.PUBLIC_KEY_ALIAS }}
+        run: |
+          set -euo pipefail
+          KEYSTORE="$RUNNER_TEMP/sdkc-play-upload-key.jks"
+          trap 'rm -f "$KEYSTORE"' EXIT
+          printf '%s' "$KS_BASE64" | base64 --decode > "$KEYSTORE"
+          ALIAS="${PUBLIC_ALIAS:-${KS_ALIAS:-smartdkclasses_release}}"
+          UNSIGNED_AAB="$(find "$PROJECT_DIR/app/build/outputs/bundle/release" -maxdepth 1 -type f -name '*.aab' -print -quit)"
+          test -f "$UNSIGNED_AAB"
+          jarsigner \
+            -keystore "$KEYSTORE" \
+            -storepass:env KS_PASSWORD \
+            -keypass:env KEY_PASSWORD \
+            -signedjar "$RUNNER_TEMP/sdkc-public-play-signed.aab" \
+            "$UNSIGNED_AAB" "$ALIAS"
+          jarsigner -verify -verbose "$RUNNER_TEMP/sdkc-public-play-signed.aab" > "$RUNNER_TEMP/aab-verification.txt"
+          echo 'Signed AAB verified with jarsigner.'
+
+      - name: Save signed Google Play AAB (Public app only)
+        if: matrix.app == 'Public' && steps.signing.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: SDKC-Public-${{ steps.project.outputs.version }}-PlayStore-AAB
+          path: ${{ runner.temp }}/sdkc-public-play-signed.aab
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Explain missing Play Store signing key
+        if: matrix.app == 'Public' && steps.signing.outputs.ready != 'true'
+        run: |
+          echo 'WARNING: Signed Play Store AAB was not produced.'
+          echo 'Add ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD, and ANDROID_KEY_PASSWORD to GitHub Actions secrets.'
+          
